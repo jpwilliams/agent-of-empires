@@ -7,11 +7,11 @@ use crate::acp::state::{
     AvailableCommand, ConfigOptionDescriptor, Event, Plan, PlanStep, SessionMode, SessionUsage,
     ToolCall, UsageCost,
 };
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::schema::MaybeUndefined;
+use agent_client_protocol::v1::schema::{
     CompactionId, CompactionStatus, ContentBlock, MessageId, NoticeSeverity, SessionId,
     SessionUpdate, TextContent,
 };
-use agent_client_protocol::schema::MaybeUndefined;
 use tracing::debug;
 
 use super::config_options::map_acp_config_option;
@@ -383,7 +383,7 @@ pub(super) fn map_update_to_events(
             if profile.supports_exit_plan_mode
                 && matches!(
                     tc.kind,
-                    agent_client_protocol::schema::v1::ToolKind::SwitchMode
+                    agent_client_protocol::v1::schema::ToolKind::SwitchMode
                 )
             {
                 if let Some(plan) = extract_plan_from_switch_mode(&raw_args) {
@@ -398,7 +398,7 @@ pub(super) fn map_update_to_events(
             if profile.emits_heartbeat_keepalives && is_heartbeat_tool_call_id(&id) {
                 return Vec::new();
             }
-            use agent_client_protocol::schema::v1::ToolCallStatus;
+            use agent_client_protocol::v1::schema::ToolCallStatus;
             // `InProgress` re-stamps `started_at` so durations measure the
             // tool, not adapter scheduling (#1060).
             let (is_error, completed, in_progress) = match update.fields.status {
@@ -590,7 +590,7 @@ pub(super) fn map_update_to_events(
             vec![Event::UsageUpdated { usage }]
         }
         SessionUpdate::AvailableCommandsUpdate(u) => {
-            use agent_client_protocol::schema::v1::AvailableCommandInput;
+            use agent_client_protocol::v1::schema::AvailableCommandInput;
             let commands: Vec<AvailableCommand> = u
                 .available_commands
                 .into_iter()
@@ -667,7 +667,7 @@ mod tests {
     use crate::acp::acp_client::test_helpers::{compaction_chunk, compaction_update, text_chunk};
     use crate::acp::acp_client::transcript_filter::{is_transcript_event, transcript_event_kind};
     use crate::acp::state::ConfigOptionCategory;
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         Content, ContentChunk, TextContent, ToolCall as AcpToolCall, ToolCallContent,
         ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
     };
@@ -776,7 +776,7 @@ mod tests {
             ),
         ] {
             let mut tc = AcpToolCall::new("tc-plan", "EnterPlanMode");
-            tc.kind = agent_client_protocol::schema::v1::ToolKind::SwitchMode;
+            tc.kind = agent_client_protocol::v1::schema::ToolKind::SwitchMode;
             tc.raw_input = Some(raw_input.clone());
             let events = claude(SessionUpdate::ToolCall(tc));
             assert_eq!(kinds(&events), want, "{raw_input}");
@@ -1321,7 +1321,7 @@ mod tests {
         }
 
         {
-            use agent_client_protocol::schema::v1::{Diff, ToolKind};
+            use agent_client_protocol::v1::schema::{Diff, ToolKind};
             let diff = || ToolCallContent::Diff(Diff::new("src/foo.rs", "new").old_text("old"));
             let codex = |update| map_update_to_events(update, &agent_profiles::CODEX);
 
@@ -1396,7 +1396,7 @@ mod tests {
 
     #[test]
     fn mode_and_config_option_updates() {
-        use agent_client_protocol::schema::v1::CurrentModeUpdate;
+        use agent_client_protocol::v1::schema::CurrentModeUpdate;
         for (id, want) in [
             ("yolo", SessionMode::BypassPermissions),
             ("auto_edit", SessionMode::AcceptEdits),
@@ -1422,7 +1422,7 @@ mod tests {
         }
 
         {
-            use agent_client_protocol::schema::v1::{
+            use agent_client_protocol::v1::schema::{
                 ConfigOptionUpdate, SessionConfigOption, SessionConfigOptionCategory,
                 SessionConfigSelectOption,
             };
