@@ -1,0 +1,98 @@
+# Jack's patched Agent of Empires: builds the `jack` branch (upstream main plus
+# our patches) and publishes it as a release that /etc/nixos/packages/
+# agent-of-empires.nix can fetch. Upstream's own workflows are disabled on
+# this fork; this is the only one that runs. Guidance: ~/agents/docs/agent-of-empires.md
+
+name: Build patched aoe
+
+on:
+  push:
+    branches: [jack]
+  workflow_dispatch:
+  # Mondays: merge upstream main into jack, then build if anything came in.
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: jack-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: jack
+          fetch-depth: 0
+
+      - name: Merge upstream main (scheduled runs only)
+        if: github.event_name == 'schedule'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/agent-of-empires/agent-of-empires.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already has upstream main; nothing to build."
+            echo "SKIP=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          # A conflict fails the run here, before anything is built or pushed.
+          # Resolve it locally (see the guidance doc) and push jack.
+          git merge --no-edit upstream/main
+          git push origin HEAD:jack
+
+      - uses: actions/setup-node@v4
+        if: env.SKIP != '1'
+        with:
+          node-version: 22
+
+      - name: Build web frontend
+        if: env.SKIP != '1'
+        run: cd web && npm install && npm run build
+
+      # rust-toolchain.toml pins the toolchain; rustup installs it on first use.
+      - name: Install Rust toolchain
+        if: env.SKIP != '1'
+        run: rustup show active-toolchain || rustup toolchain install
+
+      # Keeps compiled dependencies between runs, so after the first build
+      # only aoe itself recompiles.
+      - uses: Swatinem/rust-cache@v2
+        if: env.SKIP != '1'
+        with:
+          key: dev-release
+
+      # dev-release is upstream's fast profile (no LTO, 16 codegen units); it
+      # shares state with installed release builds, unlike the `dev` profile.
+      - name: Build
+        if: env.SKIP != '1'
+        run: cargo build --profile dev-release --features web
+
+      - name: Package
+        if: env.SKIP != '1'
+        run: |
+          mkdir -p dist
+          cp target/dev-release/aoe dist/aoe-linux-amd64
+          cp LICENSE THIRD_PARTY_NOTICES.md dist/
+          cp -R licenses dist/licenses
+          cd dist
+          tar -czf aoe-linux-amd64.tar.gz aoe-linux-amd64 LICENSE THIRD_PARTY_NOTICES.md licenses
+          sha256sum aoe-linux-amd64.tar.gz > aoe-linux-amd64.tar.gz.sha256
+
+      - name: Publish release
+        if: env.SKIP != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha="$(git rev-parse HEAD)"
+          tag="jack-$(date -u +%Y%m%d)-${sha:0:8}"
+          base="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo unknown)"
+          gh release create "$tag" dist/aoe-linux-amd64.tar.gz dist/aoe-linux-amd64.tar.gz.sha256 \
+            --target "$sha" \
+            --title "aoe $tag" \
+            --notes "Patched build of jack at ${sha} (upstream main after ${base}, plus our patches). dev-release profile, x86_64 Linux."
